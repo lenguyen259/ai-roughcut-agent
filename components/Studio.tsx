@@ -10,6 +10,7 @@ import { toDecisionJson, toEdl } from "../lib/edl";
 import { CutPlayer } from "../lib/playback";
 import { CLIPS, buildSample } from "../lib/sample";
 import { DEFAULT_OPTIONS, type AgentOptions, type EditResult, type PlayDomain } from "../lib/types";
+import { TimelineVoice } from "../lib/voice";
 
 type LoadedMedia = {
   name: string;
@@ -45,25 +46,30 @@ export function Studio() {
   const [appliedTranscript, setAppliedTranscript] = useState("");
   const [error, setError] = useState("");
   const [recording, setRecording] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
 
   const clock = useRef<Clock>({ time: 0, playing: false });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const player = useRef(new CutPlayer());
+  const voice = useRef(new TimelineVoice());
   const fileRef = useRef<HTMLInputElement>(null);
   const editRef = useRef(edit);
   const domainRef = useRef(domain);
   const sourceKindRef = useRef(sourceKind);
   const playingRef = useRef(false);
+  const voiceOnRef = useRef(true);
   const alive = useRef(true);
   editRef.current = edit;
   domainRef.current = domain;
   sourceKindRef.current = sourceKind;
+  voiceOnRef.current = voiceOn;
 
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
       player.current.halt();
+      voice.current.stop();
     };
   }, []);
 
@@ -87,7 +93,10 @@ export function Studio() {
           playingRef.current = false;
           clock.current.playing = false;
           player.current.pause();
+          voice.current.stop();
           setPlaying(false);
+        } else if (!audible && voiceOnRef.current) {
+          voice.current.follow(current, domainRef.current, clock.current.time, true, true);
         }
       }
       frame = requestAnimationFrame(tick);
@@ -133,6 +142,7 @@ export function Studio() {
     if (sourceKind === "file") clock.current.time = player.current.pause();
     playingRef.current = false;
     clock.current.playing = false;
+    voice.current.stop();
     setPlaying(false);
     setUiTime(clock.current.time);
   }
@@ -142,6 +152,7 @@ export function Studio() {
     const duration = durationOf(current);
     const time = Math.min(Math.max(0, next), duration);
     clock.current.time = time;
+    voice.current.retarget();
     setUiTime(time);
     if (playingRef.current && sourceKind === "file" && media) {
       void player.current.play({
@@ -178,6 +189,10 @@ export function Studio() {
     playingRef.current = true;
     clock.current.playing = true;
     setPlaying(true);
+    if (sourceKind !== "file") {
+      voice.current.unlock();
+      voice.current.follow(current, domain, from, true, voiceOnRef.current, true);
+    }
     if (sourceKind === "file" && media) {
       try {
         await player.current.play({
@@ -377,14 +392,18 @@ export function Studio() {
     }
   }
 
-  function speakKept() {
+  function toggleVoice() {
     if (!("speechSynthesis" in window)) {
       setError("This browser has no speech synthesis.");
       return;
     }
-    window.speechSynthesis.cancel();
-    const text = edit.words.filter((word) => !word.filler).map((word) => word.text).join(" ");
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    const next = !voiceOn;
+    setVoiceOn(next);
+    voiceOnRef.current = next;
+    if (!next) voice.current.stop();
+    else if (playingRef.current && sourceKind !== "file") {
+      voice.current.follow(edit, domain, clock.current.time, true, true, true);
+    }
   }
 
   return (
@@ -552,15 +571,15 @@ export function Studio() {
                 9:16
               </button>
             </div>
-            <button type="button" onClick={speakKept}>
-              Speak kept script
+            <button type="button" className={voiceOn ? "on" : ""} onClick={toggleVoice}>
+              {voiceOn ? "Voice on" : "Voice off"}
             </button>
           </div>
           <div className="stage-shell">
             <Stage edit={edit} aspect={aspect} domain={domain} clock={clock} canvasRef={canvasRef} />
           </div>
           {error ? <p className="error">{error}</p> : null}
-          <p className="hint center">Space plays the cut. Source view marks lifted breaths in red. Program view is the assembly.</p>
+          <p className="hint center">Play speaks each caption with the timeline. Pause and seek cut the voice off at the playhead.</p>
         </section>
 
         <aside className="transcript">
