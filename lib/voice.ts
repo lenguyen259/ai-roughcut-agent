@@ -1,89 +1,125 @@
-import type { CaptionCue, EditResult, PlayDomain } from "./types";
+import { sourceToProgram } from "./agent";
+import type { EditResult, PlayDomain } from "./types";
 
-export class TimelineVoice {
+export type SpokenWord = {
+  text: string;
+  start: number;
+  end: number;
+};
+
+type Span = {
+  word: SpokenWord;
+  from: number;
+  to: number;
+};
+
+type VoiceKind = "female" | "male" | "any";
+
+export class FrameVoice {
   private generation = 0;
-  private activeKey: string | null = null;
+  private spans: Span[] = [];
+  private index = -1;
+  private markedAt = 0;
+  private running = false;
+  onEnded: ((time: number) => void) | null = null;
+
+  isRunning(): boolean {
+    return this.running;
+  }
 
   stop(): void {
     this.generation += 1;
-    this.activeKey = null;
+    this.running = false;
+    this.index = -1;
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
   }
 
-  retarget(): void {
-    this.generation += 1;
-    this.activeKey = null;
-    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  sample(): number | null {
+    if (!this.running || this.index < 0) return null;
+    const word = this.spans[this.index]?.word;
+    if (!word) return null;
+    const elapsed = (performance.now() - this.markedAt) / 1000;
+    const guess = Math.max(0.22, word.text.length * 0.064);
+    const progress = Math.min(0.96, elapsed / guess);
+    return word.start + (word.end - word.start) * progress;
   }
 
-  unlock(): void {
+  start(words: SpokenWord[], from: number, kind: VoiceKind = "any"): void {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance(" ");
-    utterance.volume = 0;
-    window.speechSynthesis.speak(utterance);
-  }
-
-  follow(edit: EditResult, domain: PlayDomain, time: number, playing: boolean, enabled: boolean, immediate = false): void {
-    if (!enabled || !playing || typeof window === "undefined" || !window.speechSynthesis) {
-      if (!playing || !enabled) this.stop();
-      return;
+    const synth = window.speechSynthesis;
+    const wasSpeaking = synth.speaking || synth.pending;
+    this.generation += 1;
+    const generation = this.generation;
+    this.running = false;
+    this.index = -1;
+    synth.cancel();
+    const upcoming = words.filter((word) => word.end > from + 0.02 && tokenOf(word.text).length > 0);
+    this.spans = [];
+    let cursor = 0;
+    const parts: string[] = [];
+    for (const word of upcoming) {
+      const token = tokenOf(word.text);
+      if (parts.length > 0) cursor += 1;
+      const fromChar = cursor;
+      parts.push(token);
+      cursor += token.length;
+      this.spans.push({ word, from: fromChar, to: cursor });
     }
-    if (domain === "source" && edit.lifted.some((span) => time >= span.start && time < span.end)) return;
-    const cue = cueAt(edit, domain, time);
-    if (!cue) return;
-    const key = `${domain}:${cue.programIn.toFixed(3)}:${cue.sourceIn.toFixed(3)}`;
-    if (key === this.activeKey) return;
-    const words = cue.words.filter((word) => {
-      const end = domain === "program" ? word.programOut : word.sourceOut;
-      return end > time + 0.03;
-    });
-    if (words.length === 0) return;
-    this.activeKey = key;
-    const start = domain === "program" ? words[0].programIn : words[0].sourceIn;
-    const end = domain === "program" ? words[words.length - 1].programOut : words[words.length - 1].sourceOut;
-    const span = Math.max(0.35, end - Math.max(time, start));
-    const rate = clamp((words.length * 0.42) / span, 0.9, 1.45);
-    this.speak(words.map((word) => word.text).join(" "), rate, immediate);
-  }
-
-  private speak(text: string, rate: number, immediate: boolean): void {
-    const generation = ++this.generation;
-    window.speechSynthesis.cancel();
-    const start = () => {
+    if (this.spans.length === 0) return;
+    this.running = true;
+    this.index = 0;
+    this.markedAt = performance.now();
+    const utterance = new SpeechSynthesisUtterance(parts.join(" "));
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.lang = "en-US";
+    const voice = pickVoice(kind);
+    if (voice) utterance.voice = voice;
+    utterance.onboundary = (event) => {
       if (generation !== this.generation) return;
-      const utterance = new SpeechSynthesisUtterance(text.replace(/\s+/g, " ").trim());
-      utterance.rate = rate;
-      utterance.pitch = 1;
-      utterance.lang = "en-US";
-      const voice = pickVoice();
-      if (voice) utterance.voice = voice;
-      window.speechSynthesis.speak(utterance);
+      if (event.name && event.name !== "word") return;
+      const span = this.spans.find((item) => event.charIndex >= item.from && event.charIndex < item.to);
+      if (!span) return;
+      this.index = this.spans.indexOf(span);
+      this.markedAt = performance.now();
     };
-    if (immediate) start();
-    else window.setTimeout(start, 40);
+    utterance.onend = () => {
+      if (generation !== this.generation || !this.running) return;
+      const last = this.spans[this.spans.length - 1];
+      this.running = false;
+      this.index = -1;
+      if (last) this.onEnded?.(last.word.end);
+    };
+    const speak = () => {
+      if (generation !== this.generation) return;
+      synth.speak(utterance);
+    };
+    if (wasSpeaking) window.setTimeout(speak, 40);
+    else speak();
   }
 }
 
-function cueAt(edit: EditResult, domain: PlayDomain, time: number): CaptionCue | null {
-  return (
-    edit.captions.find((cue) => {
-      const start = domain === "program" ? cue.programIn : cue.sourceIn;
-      const end = domain === "program" ? cue.programOut : cue.sourceOut;
-      return time >= start && time < end;
-    }) ?? null
-  );
+export function spokenWords(edit: EditResult, domain: PlayDomain, from: number): SpokenWord[] {
+  const words: SpokenWord[] = [];
+  for (const word of edit.words) {
+    if (word.filler) continue;
+    const start = domain === "program" ? sourceToProgram(edit.keeps, word.start) : word.start;
+    const end = domain === "program" ? sourceToProgram(edit.keeps, word.end) : word.end;
+    if (start === null || end === null || end <= from + 0.02) continue;
+    words.push({ text: word.text, start, end: Math.max(end, start + 0.05) });
+  }
+  return words;
 }
 
-function pickVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  return (
-    voices.find((voice) => /en-US/i.test(voice.lang) && /natural|google|aria|jenny|samantha/i.test(voice.name)) ??
-    voices.find((voice) => /en-US/i.test(voice.lang)) ??
-    voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ??
-    null
-  );
+function tokenOf(text: string): string {
+  return text.replace(/[^\p{L}\p{N}'’-]+/gu, "");
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+function pickVoice(kind: VoiceKind): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+  const female = /female|samantha|victoria|zira|aria|jenny|sara|susan|karen|moira/i;
+  const male = /male|david|mark|guy|daniel|alex|fred|rishi|george/i;
+  if (kind === "female") return voices.find((voice) => female.test(voice.name)) ?? voices[0] ?? null;
+  if (kind === "male") return voices.find((voice) => male.test(voice.name)) ?? voices[0] ?? null;
+  return voices.find((voice) => /natural|google/i.test(voice.name)) ?? voices[0] ?? null;
 }

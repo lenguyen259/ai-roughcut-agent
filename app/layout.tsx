@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { Fraunces, Outfit } from "next/font/google";
 import "./globals.css";
+
+const display = Fraunces({ subsets: ["latin"], variable: "--font-display" });
+const sans = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "Roughcut Agent",
@@ -8,14 +12,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0c0b0a",
+  themeColor: "#070706",
   width: "device-width",
   initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>{children}</body>
     </html>
   );

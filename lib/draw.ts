@@ -113,6 +113,8 @@ function drawAroll(ctx: CanvasRenderingContext2D, w: number, h: number, time: nu
   wall.addColorStop(1, "#090807");
   ctx.fillStyle = wall;
   ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(255, 214, 170, 0.08)";
+  ctx.fillRect(w * 0.08, h * 0.08, w * 0.22, h * 0.34);
   const key = ctx.createRadialGradient(cx - head * 1.1, cy - head * 1.5, 10, cx, cy, head * 3.4);
   key.addColorStop(0, "rgba(255, 196, 140, 0.55)");
   key.addColorStop(1, "rgba(255, 196, 140, 0)");

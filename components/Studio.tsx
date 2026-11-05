@@ -10,7 +10,7 @@ import { toDecisionJson, toEdl } from "../lib/edl";
 import { CutPlayer } from "../lib/playback";
 import { CLIPS, buildSample } from "../lib/sample";
 import { DEFAULT_OPTIONS, type AgentOptions, type EditResult, type PlayDomain } from "../lib/types";
-import { TimelineVoice } from "../lib/voice";
+import { FrameVoice, spokenWords } from "../lib/voice";
 
 type LoadedMedia = {
   name: string;
@@ -51,7 +51,7 @@ export function Studio() {
   const clock = useRef<Clock>({ time: 0, playing: false });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const player = useRef(new CutPlayer());
-  const voice = useRef(new TimelineVoice());
+  const voice = useRef(new FrameVoice());
   const fileRef = useRef<HTMLInputElement>(null);
   const editRef = useRef(edit);
   const domainRef = useRef(domain);
@@ -66,6 +66,13 @@ export function Studio() {
 
   useEffect(() => {
     alive.current = true;
+    voice.current.onEnded = (time) => {
+      clock.current.time = time;
+      clock.current.playing = false;
+      playingRef.current = false;
+      setPlaying(false);
+      setUiTime(time);
+    };
     return () => {
       alive.current = false;
       player.current.halt();
@@ -85,24 +92,25 @@ export function Studio() {
         const audible = sourceKindRef.current === "file";
         if (audible && player.current.isPlaying()) {
           clock.current.time = player.current.getTime();
+        } else if (!audible && voiceOnRef.current && voice.current.isRunning()) {
+          const sample = voice.current.sample();
+          if (sample !== null) clock.current.time = sample;
         } else if (!audible) {
           clock.current.time += delta;
         }
-        if (clock.current.time >= duration - 0.02) {
+        if (!voice.current.isRunning() && clock.current.time >= duration - 0.02) {
           clock.current.time = duration;
           playingRef.current = false;
           clock.current.playing = false;
           player.current.pause();
           voice.current.stop();
           setPlaying(false);
-        } else if (!audible && voiceOnRef.current) {
-          voice.current.follow(current, domainRef.current, clock.current.time, true, true);
         }
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    const mirror = window.setInterval(() => setUiTime(clock.current.time), 120);
+    const mirror = window.setInterval(() => setUiTime(clock.current.time), 40);
     return () => {
       cancelAnimationFrame(frame);
       window.clearInterval(mirror);
@@ -152,8 +160,12 @@ export function Studio() {
     const duration = durationOf(current);
     const time = Math.min(Math.max(0, next), duration);
     clock.current.time = time;
-    voice.current.retarget();
     setUiTime(time);
+    if (playingRef.current && sourceKind !== "file" && voiceOnRef.current) {
+      voice.current.start(spokenWords(current, domain, time), time);
+    } else {
+      voice.current.stop();
+    }
     if (playingRef.current && sourceKind === "file" && media) {
       void player.current.play({
         buffer: media.buffer,
@@ -189,9 +201,8 @@ export function Studio() {
     playingRef.current = true;
     clock.current.playing = true;
     setPlaying(true);
-    if (sourceKind !== "file") {
-      voice.current.unlock();
-      voice.current.follow(current, domain, from, true, voiceOnRef.current, true);
+    if (sourceKind !== "file" && voiceOnRef.current) {
+      voice.current.start(spokenWords(current, domain, from), from);
     }
     if (sourceKind === "file" && media) {
       try {
@@ -402,7 +413,7 @@ export function Studio() {
     voiceOnRef.current = next;
     if (!next) voice.current.stop();
     else if (playingRef.current && sourceKind !== "file") {
-      voice.current.follow(edit, domain, clock.current.time, true, true, true);
+      voice.current.start(spokenWords(edit, domain, clock.current.time), clock.current.time);
     }
   }
 
@@ -579,7 +590,7 @@ export function Studio() {
             <Stage edit={edit} aspect={aspect} domain={domain} clock={clock} canvasRef={canvasRef} />
           </div>
           {error ? <p className="error">{error}</p> : null}
-          <p className="hint center">Play speaks each caption with the timeline. Pause and seek cut the voice off at the playhead.</p>
+          <p className="hint center">Play locks each spoken word to the frame. Pause and seek restart the voice on that word.</p>
         </section>
 
         <aside className="transcript">
