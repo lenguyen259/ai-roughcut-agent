@@ -9,12 +9,28 @@ type PaintInput = {
   aspect: Aspect;
   domain: PlayDomain;
   time: number;
+  live: boolean;
 };
 
 const FRAME: Record<Aspect, { w: number; h: number }> = {
   "16:9": { w: 1280, h: 720 },
   "9:16": { w: 720, h: 1280 },
 };
+
+export const HOST_CLOSED_MOUTH = 3.55;
+
+export function hostOnCamera(edit: EditResult, domain: PlayDomain, time: number): boolean {
+  const sourceTime = domain === "source" ? time : programToSource(edit.keeps, time);
+  const lifted = domain === "source" && edit.lifted.some((span) => sourceTime >= span.start && sourceTime <= span.end);
+  if (lifted) return false;
+  const onBroll = edit.broll.some((hit) => {
+    if (domain === "program") return time >= hit.programIn && time < hit.programOut;
+    return sourceTime >= hit.sourceIn && sourceTime < hit.sourceOut;
+  });
+  if (onBroll) return false;
+  const bridge = 0.08;
+  return edit.words.some((word) => !word.filler && sourceTime >= word.start - bridge && sourceTime <= word.end + bridge);
+}
 
 type SceneId = "aroll" | ClipId;
 
@@ -31,11 +47,10 @@ export function paint(canvas: HTMLCanvasElement, input: PaintInput): void {
   const sourceTime = input.domain === "source" ? input.time : programToSource(input.edit.keeps, input.time);
   const lifted = input.domain === "source" && input.edit.lifted.some((span) => sourceTime >= span.start && sourceTime <= span.end);
   const broll = findBroll(input.edit, input.domain, input.time, sourceTime, lifted);
-  const activeWord = input.edit.words.find((word) => !word.filler && sourceTime >= word.start && sourceTime <= word.end);
-  const speaking = Boolean(activeWord) && !lifted;
+  const talking = input.live && hostOnCamera(input.edit, input.domain, input.time);
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : input.time;
 
-  drawScene(ctx, broll?.clipId ?? "aroll", w, h, motion, speaking, activeWord?.text ?? "");
+  drawScene(ctx, broll?.clipId ?? "aroll", w, h, motion, talking, "");
   vignette(ctx, w, h);
   if (broll && !lifted) chip(ctx, broll.title, w);
   if (lifted) drawLift(ctx, w, h);
@@ -102,26 +117,36 @@ function drawScene(
   }
 }
 
-function drawAroll(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number, _speaking: boolean, _word: string): void {
-  const shade = ctx.createLinearGradient(0, 0, 0, h * 0.28);
-  shade.addColorStop(0, "rgba(0,0,0,0.55)");
-  shade.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, w, h * 0.28);
-  const plateW = Math.min(340, w * 0.46);
-  round(ctx, 28, 28, plateW, 64, 8, "rgba(8,8,10,0.72)");
-  ctx.fillStyle = "#ff6a2a";
-  ctx.fillRect(28, 28, 6, 64);
+function drawAroll(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number, speaking: boolean, _word: string): void {
+  const scrim = ctx.createLinearGradient(0, h * 0.58, 0, h);
+  scrim.addColorStop(0, "rgba(0,0,0,0)");
+  scrim.addColorStop(1, "rgba(0,0,0,0.72)");
+  ctx.fillStyle = scrim;
+  ctx.fillRect(0, h * 0.58, w, h * 0.42);
+  ctx.fillStyle = speaking ? "#e10600" : "rgba(255,255,255,0.4)";
+  ctx.beginPath();
+  ctx.arc(w * 0.048, h * 0.055, Math.max(5, w * 0.006), 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = "#f6f1e8";
   ctx.textAlign = "left";
-  ctx.font = "700 24px Georgia, serif";
-  ctx.fillText("HOST", 48, 54);
-  ctx.font = "600 14px Segoe UI, sans-serif";
-  ctx.fillStyle = "#d9d0c3";
-  ctx.fillText("CAM A  ·  SUNDAY SHIP", 48, 76);
+  ctx.font = `700 ${Math.max(13, Math.floor(w / 56))}px Arial, Helvetica, sans-serif`;
+  ctx.fillText("SUNDAY SHIP", w * 0.068, h * 0.062);
+  const strapY = h * (w < h ? 0.62 : 0.66);
+  const strapH = Math.max(52, Math.floor(h * 0.1));
+  const strapW = Math.min(w * 0.52, 460);
+  ctx.fillStyle = "rgba(8,8,10,0.8)";
+  ctx.fillRect(w * 0.048, strapY, strapW, strapH);
+  ctx.fillStyle = "#e6a15a";
+  ctx.fillRect(w * 0.048, strapY, strapW, 4);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${Math.max(20, Math.floor(w / 32))}px Georgia, serif`;
+  ctx.fillText("Host", w * 0.048 + 16, strapY + strapH * 0.46);
+  ctx.fillStyle = "rgba(255,255,255,0.78)";
+  ctx.font = `600 ${Math.max(12, Math.floor(w / 62))}px Arial, Helvetica, sans-serif`;
+  ctx.fillText("Sunday Ship  ·  Talking head", w * 0.048 + 16, strapY + strapH * 0.78);
 }
 
-function drawCoffee(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawCoffee(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   gradient(ctx, w, h, "#3a2418", "#120d0b");
   ctx.fillStyle = "#6b3a22";
   ctx.beginPath();
@@ -134,23 +159,10 @@ function drawCoffee(ctx: CanvasRenderingContext2D, w: number, h: number, time: n
   round(ctx, cupX, cupY, cupW, cupH, 18, "#f4efe6");
   ctx.fillStyle = "#4a2a18";
   ctx.fillRect(cupX + 8, cupY + 8, cupW - 16, h * 0.05);
-  ctx.strokeStyle = "rgba(255,255,255,0.7)";
-  ctx.lineWidth = 3;
-  for (let index = 0; index < 3; index += 1) {
-    ctx.beginPath();
-    const origin = cupX + cupW * (0.3 + index * 0.2);
-    ctx.moveTo(origin, cupY);
-    for (let step = 0; step < 12; step += 1) {
-      const y = cupY - step * h * 0.018;
-      const x = origin + Math.sin(time * 2.4 + step * 0.7 + index) * 10;
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  label(ctx, "B-ROLL  ·  MORNING POUR", w, h);
+  label(ctx, "Morning pour", w, h);
 }
 
-function drawTimeline(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawTimeline(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   gradient(ctx, w, h, "#12151c", "#07080c");
   round(ctx, w * 0.08, h * 0.18, w * 0.84, h * 0.64, 18, "#0e1218");
   const rows = [0.32, 0.46, 0.6];
@@ -159,21 +171,20 @@ function drawTimeline(ctx: CanvasRenderingContext2D, w: number, h: number, time:
       const gap = rowIndex === 1 && (index === 1 || index === 3);
       if (gap) continue;
       const x = w * (0.14 + index * 0.15);
-      round(ctx, x, h * row, w * 0.12, h * 0.08, 8, rowIndex === 0 ? "#ff6a2a" : "#2f6fed");
+      round(ctx, x, h * row, w * 0.12, h * 0.08, 8, rowIndex === 0 ? "#e6a15a" : "#3a342c");
     }
   });
-  const playhead = w * (0.18 + ((time * 0.15) % 0.68));
   ctx.fillStyle = "#f3ecdf";
-  ctx.fillRect(playhead, h * 0.24, 2, h * 0.5);
-  label(ctx, "B-ROLL  ·  TIMELINE PASS", w, h);
+  ctx.fillRect(w * 0.42, h * 0.24, 2, h * 0.5);
+  label(ctx, "Timeline pass", w, h);
 }
 
-function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   gradient(ctx, w, h, "#102018", "#08110d");
   const bars = [0.28, 0.36, 0.33, 0.48, 0.44, 0.62, 0.58];
   bars.forEach((value, index) => {
-    const height = h * value * (0.85 + Math.sin(time + index) * 0.04);
-    round(ctx, w * (0.16 + index * 0.1), h * 0.72 - height, w * 0.06, height, 8, index === bars.length - 1 ? "#b6f27c" : "#1f8a70");
+    const height = h * value * 0.85;
+    round(ctx, w * (0.16 + index * 0.1), h * 0.72 - height, w * 0.06, height, 8, index === bars.length - 1 ? "#e6a15a" : "#3a342c");
   });
   ctx.strokeStyle = "#f3ecdf";
   ctx.lineWidth = 3;
@@ -185,10 +196,10 @@ function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, time: nu
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
-  label(ctx, "B-ROLL  ·  RETENTION", w, h);
+  label(ctx, "Retention", w, h);
 }
 
-function drawPhone(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawPhone(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   gradient(ctx, w, h, "#20140f", "#090909");
   const phoneW = Math.min(w, h) * 0.34;
   const phoneH = phoneW * 1.9;
@@ -196,16 +207,15 @@ function drawPhone(ctx: CanvasRenderingContext2D, w: number, h: number, time: nu
   const y = h * 0.5 - phoneH / 2;
   round(ctx, x, y, phoneW, phoneH, 28, "#f3ecdf");
   round(ctx, x + 10, y + 12, phoneW - 20, phoneH - 24, 20, "#16120f");
-  ctx.fillStyle = "#ff6a2a";
-  ctx.font = "700 28px Segoe UI, sans-serif";
+  ctx.fillStyle = "#e6a15a";
+  ctx.font = "700 28px Arial, Helvetica, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("9:16", w * 0.5, y + phoneH * 0.42);
-  const progress = (time % 2.4) / 2.4;
-  round(ctx, x + 28, y + phoneH * 0.72, (phoneW - 56) * progress, 8, 4, "#b6f27c");
-  label(ctx, "B-ROLL  ·  VERTICAL", w, h);
+  round(ctx, x + 28, y + phoneH * 0.72, (phoneW - 56) * 0.62, 8, 4, "#e6a15a");
+  label(ctx, "Vertical", w, h);
 }
 
-function drawCity(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawCity(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   const sky = ctx.createLinearGradient(0, 0, 0, h);
   sky.addColorStop(0, "#1b2448");
   sky.addColorStop(1, "#d06a45");
@@ -221,30 +231,30 @@ function drawCity(ctx: CanvasRenderingContext2D, w: number, h: number, time: num
     const x = w * 0.04 + index * w * 0.095;
     ctx.fillStyle = "#141820";
     ctx.fillRect(x, h * 0.78 - bh, bw, bh + h * 0.22);
-    if ((index + Math.floor(time)) % 2 === 0) {
-      ctx.fillStyle = "rgba(255, 206, 120, 0.8)";
+    if (index % 2 === 0) {
+      ctx.fillStyle = "rgba(255, 206, 120, 0.55)";
       ctx.fillRect(x + bw * 0.35, h * 0.78 - bh * 0.6, bw * 0.15, bh * 0.12);
     }
   }
-  label(ctx, "B-ROLL  ·  NIGHT UPLOAD", w, h);
+  label(ctx, "Night upload", w, h);
 }
 
-function drawMic(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
+function drawMic(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number): void {
   gradient(ctx, w, h, "#16141c", "#09090d");
   const cx = w * 0.5;
   const cy = h * 0.46;
-  ctx.strokeStyle = "rgba(255,106,42,0.7)";
+  ctx.strokeStyle = "rgba(230,161,90,0.65)";
   ctx.lineWidth = 3;
   for (let index = 1; index <= 3; index += 1) {
     ctx.beginPath();
-    ctx.arc(cx, cy, Math.min(w, h) * (0.12 + index * 0.08) + Math.sin(time * 2 + index) * 4, 0, Math.PI * 2);
+    ctx.arc(cx, cy, Math.min(w, h) * (0.12 + index * 0.08), 0, Math.PI * 2);
     ctx.stroke();
   }
   round(ctx, cx - 28, cy - 70, 56, 110, 28, "#f3ecdf");
   round(ctx, cx - 16, cy - 52, 32, 48, 16, "#242028");
   ctx.fillStyle = "#f3ecdf";
   ctx.fillRect(cx - 3, cy + 40, 6, h * 0.16);
-  label(ctx, "B-ROLL  ·  VOICE BOOTH", w, h);
+  label(ctx, "Voice booth", w, h);
 }
 
 function drawLift(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -260,44 +270,47 @@ function drawLift(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     ctx.stroke();
   }
   ctx.fillStyle = "#ffd0d6";
-  ctx.font = "700 64px Georgia, serif";
+  ctx.font = "700 48px Arial, Helvetica, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("LIFT", w / 2, h / 2);
+  ctx.fillText("LIFTED", w / 2, h / 2);
   ctx.restore();
 }
 
 function drawCaption(ctx: CanvasRenderingContext2D, cue: CaptionCue, domain: PlayDomain, time: number, w: number, h: number): void {
-  const size = Math.max(32, Math.floor(w / 24));
-  ctx.font = `800 ${size}px "Segoe UI", sans-serif`;
+  const size = Math.max(28, Math.floor(w / 28));
+  ctx.font = `800 ${size}px Arial, Helvetica, sans-serif`;
   ctx.textBaseline = "middle";
-  ctx.lineJoin = "round";
-  const widths = cue.words.map((word) => ctx.measureText(`${word.text} `).width);
-  const total = widths.reduce((sum, width) => sum + width, 0);
-  let cursor = (w - total) / 2;
-  const mid = h * (w < h ? 0.78 : 0.84);
+  const gap = size * 0.35;
+  const widths = cue.words.map((word) => ctx.measureText(word.text).width);
+  const total = widths.reduce((sum, width) => sum + width, 0) + gap * Math.max(0, cue.words.length - 1);
+  const boxW = Math.min(w * 0.9, total + size);
+  const boxH = size * 1.7;
+  const boxX = (w - boxW) / 2;
+  const boxY = h * (w < h ? 0.78 : 0.8);
+  ctx.fillStyle = "rgba(0,0,0,0.78)";
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  let cursor = boxX + (boxW - total) / 2;
+  const mid = boxY + boxH / 2;
   cue.words.forEach((word, index) => {
     const start = domain === "program" ? word.programIn : word.sourceIn;
     const end = domain === "program" ? word.programOut : word.sourceOut;
     const active = time >= start && time < end;
-    ctx.lineWidth = Math.max(6, size * 0.16);
-    ctx.strokeStyle = "#111";
-    ctx.strokeText(word.text, cursor, mid);
-    ctx.fillStyle = active ? "#ffe14a" : "#ffffff";
+    ctx.fillStyle = active ? "#ffffff" : "rgba(255,255,255,0.45)";
+    ctx.textAlign = "left";
     ctx.fillText(word.text, cursor, mid);
-    cursor += widths[index] ?? 0;
+    cursor += (widths[index] ?? 0) + gap;
   });
 }
 
 function burnIn(ctx: CanvasRenderingContext2D, input: PaintInput, sourceTime: number, w: number, h: number): void {
   ctx.save();
-  ctx.font = "600 22px Consolas, monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "rgba(243, 236, 223, 0.86)";
-  const program = input.domain === "program" ? input.time : sourceTime;
-  ctx.fillText(`${input.domain === "program" ? "PGM" : "SRC"}  ${formatTimecode(program)}`, 28, h - 28);
+  ctx.font = "600 16px Consolas, monospace";
   ctx.textAlign = "right";
-  ctx.fillText(input.aspect, w - 28, h - 28);
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(243, 236, 223, 0.8)";
+  const program = input.domain === "program" ? input.time : sourceTime;
+  ctx.fillText(`${input.domain === "program" ? "PGM" : "SRC"}  ${formatTimecode(program)}`, w - 28, 36);
+  ctx.fillText(input.aspect, w - 28, 58);
   ctx.restore();
 }
 
@@ -325,19 +338,25 @@ function round(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
 }
 
 function label(ctx: CanvasRenderingContext2D, text: string, w: number, h: number): void {
-  ctx.font = "700 22px Segoe UI, sans-serif";
+  const size = Math.max(28, Math.floor(w / 22));
   ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(243,236,223,0.8)";
-  ctx.fillText(text, 28, h * 0.1);
-  ctx.textAlign = "right";
-  ctx.fillText("FREE LIBRARY", w - 28, h * 0.1);
+  ctx.fillStyle = "#e6a15a";
+  ctx.fillRect(w * 0.08, h * 0.62, Math.min(72, w * 0.08), 4);
+  ctx.font = `700 ${Math.max(12, Math.floor(w / 58))}px Arial, Helvetica, sans-serif`;
+  ctx.fillText("CUTAWAY", w * 0.08, h * 0.6);
+  ctx.fillStyle = "#f6f1e8";
+  ctx.font = `700 ${size}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(text, w * 0.08, h * 0.68);
 }
 
 function chip(ctx: CanvasRenderingContext2D, title: string, w: number): void {
-  ctx.font = "700 20px Segoe UI, sans-serif";
-  const width = ctx.measureText(title).width + 28;
-  round(ctx, w - width - 24, 56, width, 36, 18, "rgba(255,106,42,0.92)");
-  ctx.fillStyle = "#1a0d07";
+  ctx.font = "700 16px Arial, Helvetica, sans-serif";
+  const width = ctx.measureText(title).width + 24;
+  ctx.fillStyle = "rgba(8,8,10,0.72)";
+  ctx.fillRect(w - width - 28, 28, width, 32);
+  ctx.fillStyle = "#e6a15a";
+  ctx.fillRect(w - width - 28, 28, width, 3);
+  ctx.fillStyle = "#f6f1e8";
   ctx.textAlign = "left";
-  ctx.fillText(title, w - width - 10, 80);
+  ctx.fillText(title, w - width - 16, 50);
 }
