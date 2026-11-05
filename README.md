@@ -1,5 +1,7 @@
 # Roughcut Agent
 
+Demo: https://ai-roughcut-agent.vercel.app
+
 Browser copilot for a long raw interview or vlog. The agent proposes a rough cut: fillers and silence already lifted, B-roll already on a track. A person accepts or rejects each hit, then exports a CMX 3600 EDL to finish in Shotcut, Kdenlive, or DaVinci Resolve.
 
 The demo rushes are word timings across a 5–20 minute timeline. An uploaded audio file is the path for your own rushes. Nothing is uploaded.
