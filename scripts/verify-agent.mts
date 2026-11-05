@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { activeWordId, runAgent, sourceToProgram } from "../lib/agent.ts";
+import { activeWordId, applyDecisions, runAgent, sourceToProgram } from "../lib/agent.ts";
 import { alignTranscript, wordsFromSpeech } from "../lib/audio.ts";
 import { cosine, embed, scoreText } from "../lib/embed.ts";
 import { toEdl } from "../lib/edl.ts";
@@ -15,7 +15,23 @@ console.log(
   edit.broll.map((hit) => `${hit.title}:${hit.score.toFixed(2)}`).join(" | "),
 );
 
+assert.ok(
+  sample.sourceDuration >= 5 * 60 && sample.sourceDuration <= 20 * 60,
+  `source should be 5–20 minutes, got ${(sample.sourceDuration / 60).toFixed(2)}`,
+);
 assert.ok(edit.programDuration < edit.sourceDuration, "program should be shorter than source");
+assert.ok(edit.broll.length >= 1, "B-roll should be placed on the cut");
+for (const hit of edit.broll) {
+  assert.ok(hit.programOut > hit.programIn, `${hit.title} should have a length on the timeline`);
+  assert.ok(hit.programOut <= edit.programDuration + 0.05, `${hit.title} should sit inside the rough cut`);
+  const onKeep = edit.keeps.some((keep) => hit.programIn >= keep.programIn - 0.05 && hit.programIn < keep.programOut);
+  assert.ok(onKeep, `${hit.title} should sit on a kept A-roll span`);
+}
+const resolved = applyDecisions(edit, { rejectedLiftKeys: [], rejectedBrollKeys: [] });
+assert.equal(resolved.broll.length, edit.broll.length);
+assert.ok(Math.abs(resolved.programDuration - edit.programDuration) < 0.2);
+const dropped = applyDecisions(edit, { rejectedLiftKeys: [], rejectedBrollKeys: [resolved.broll[0] ? `${resolved.broll[0].clipId}@${resolved.broll[0].sourceIn.toFixed(3)}` : ""] });
+assert.equal(dropped.broll.length, edit.broll.length - 1);
 assert.ok(edit.stats.removedRatio > 0.08, "expected a visible amount of lifted time");
 assert.ok(edit.stats.fillerCount >= 6, `expected fillers, got ${edit.stats.fillerCount}`);
 assert.ok(edit.stats.silenceCount >= 2, "expected silence gaps");

@@ -1,16 +1,18 @@
 # Roughcut Agent
 
-Browser rough-cut desk for a talking-head episode. It lifts fillers and long silences, drops semantic B-roll, burns kinetic captions, reframes 16:9 to 9:16, and exports a CMX 3600 EDL. Decoding, search, and playback stay in the tab.
+Browser copilot for a long raw interview or vlog. The agent proposes a rough cut: fillers and silence already lifted, B-roll already on a track. A person accepts or rejects each hit, then exports a CMX 3600 EDL to finish in Shotcut, Kdenlive, or DaVinci Resolve.
+
+The demo rushes are word timings across a 5–20 minute timeline. An uploaded audio file is the path for your own rushes. Nothing is uploaded.
 
 ## Free replacements
 
 | Paid tool in the original pipeline | What this build uses |
 | --- | --- |
-| Adobe Premiere Pro / ExtendScript | Timeline, program/source monitor, and a CMX 3600 EDL that Shotcut, Kdenlive, and DaVinci Resolve import |
+| Adobe Premiere Pro / ExtendScript | Bins, a multi-track timeline, and a CMX 3600 EDL |
 | Claude Code | A local decision loop with an inspectable log |
-| faster-whisper | Web Audio energy VAD, plus a transcript you paste or the built-in demo |
+| faster-whisper | Web Audio energy VAD, plus a transcript you paste or the built-in rushes |
 | Paid embedding APIs | 64-d hashed bag-of-words vectors and cosine search over a local visual library |
-| ElevenLabs / Runway / Midjourney | Not used. Picture is drawn on canvas. Optional voice is `speechSynthesis` |
+| ElevenLabs / Runway / Midjourney | Not used. The host plate is `public/host.mp4`. Optional review voice is `speechSynthesis` |
 
 ## Run
 
@@ -20,10 +22,10 @@ npm run verify
 npm run dev
 ```
 
-Open the demo episode, press Play, then switch the monitor between Program and Source. Source shows lifted breaths. Drop in your own audio and paste a transcript to rerun the same loop. Nothing is uploaded.
+Open the demo rushes. Review a section on the program monitor. Accept or reject lifts and B-roll, then download the EDL. The rough cut is not the finished show.
 
 ## Export
 
-- `roughcut.edl` — CMX 3600 video events
+- `roughcut.edl` — CMX 3600 video events for the accepted cut
 - `roughcut.json` — keep ranges, B-roll scores, captions, loudness
-- WebM — a picture recording of the monitor. Uploaded audio is mixed in when the browser allows it
+- WebM — a short section recording of the program monitor, with the host plate composited

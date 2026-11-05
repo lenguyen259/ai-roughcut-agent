@@ -8,7 +8,7 @@ const sans = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 export const metadata: Metadata = {
   title: "Roughcut Agent",
   description:
-    "On-device rough cut for transcripts: silence, fillers, semantic B-roll, kinetic captions, 9:16 reframe, and a CMX3600 EDL. No paid APIs.",
+    "Rough-cut copilot for long rushes. The agent lifts fillers and places B-roll. You accept or reject, then finish the timeline from a CMX 3600 EDL.",
 };
 
 export const viewport: Viewport = {

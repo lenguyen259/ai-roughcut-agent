@@ -1,7 +1,7 @@
 import { scoreText } from "./embed";
 import { peaksFromWords } from "./audio";
 import { normalizeToken } from "./text";
-import { clamp } from "./time";
+import { clamp, formatTimecode } from "./time";
 import type {
   AgentOptions,
   AnnotatedWord,
@@ -314,10 +314,10 @@ function buildLogs(
   const fillerList = words.filter((word) => word.filler).map((word) => word.text).join(", ");
   const silenceTotal = silences.reduce((total, span) => total + (span.end - span.start), 0);
   const logs = [
-    `Transcript loaded: ${words.length} tokens across ${sourceDuration.toFixed(2)}s.`,
+    `Rushes loaded: ${words.length} tokens across ${formatTimecode(sourceDuration)}.`,
     `Fillers lifted: ${stats.fillerCount}${fillerList ? ` (${fillerList})` : ""}.`,
     `Silence above ${options.silenceThreshold.toFixed(2)}s: ${silences.length} gaps, ${silenceTotal.toFixed(2)}s.`,
-    `Program time ${programDuration.toFixed(2)}s after ${keeps.length} keep segments. Removed ${(stats.removedRatio * 100).toFixed(0)}%.`,
+    `Rough cut ${formatTimecode(programDuration)} after ${keeps.length} keep segments. Lifted ${(stats.removedRatio * 100).toFixed(0)}%. You finish the timeline.`,
   ];
   if (hits.length === 0) {
     logs.push("No B-roll cleared the similarity gate. Lower the threshold or add visual keywords to the script.");
@@ -334,8 +334,67 @@ function buildLogs(
       ? "Loudness: no audio file yet, preview stays at unity gain. Target is -16 dBFS once audio is decoded."
       : `Loudness: RMS ${loudness.rmsDb.toFixed(1)} dBFS, apply ${loudness.gainDb.toFixed(1)} dB toward -16 dBFS.`,
   );
-  logs.push("Reframe: subject stays centered so the 9:16 gate crops the same action.");
+  logs.push("Rough cut is proposed. Accept or reject each lift and B-roll hit, then export the EDL.");
   return logs;
+}
+
+export function liftKey(span: Interval): string {
+  return `${span.start.toFixed(3)}-${span.end.toFixed(3)}`;
+}
+
+export function brollKey(hit: BrollHit): string {
+  return `${hit.clipId}@${hit.sourceIn.toFixed(3)}`;
+}
+
+export function liftLabel(edit: EditResult, span: Interval): string {
+  const words = edit.words.filter((word) => {
+    const mid = (word.start + word.end) / 2;
+    return mid >= span.start && mid <= span.end;
+  });
+  if (words.length === 0) return "Silence";
+  return words.map((word) => word.text).join(" ");
+}
+
+export function applyDecisions(
+  edit: EditResult,
+  decisions: { rejectedLiftKeys: string[]; rejectedBrollKeys: string[] },
+): EditResult {
+  const rejectedLifts = new Set(decisions.rejectedLiftKeys);
+  const rejectedBroll = new Set(decisions.rejectedBrollKeys);
+  const acceptedLifts = edit.lifted.filter((span) => !rejectedLifts.has(liftKey(span)));
+  const words = edit.words.map((word) => {
+    if (!word.filler) return word;
+    const mid = (word.start + word.end) / 2;
+    const restored = edit.lifted.some(
+      (span) => rejectedLifts.has(liftKey(span)) && mid >= span.start && mid <= span.end,
+    );
+    return restored ? { ...word, filler: false } : word;
+  });
+  const keeps = toProgram(subtractInterval({ start: 0, end: edit.sourceDuration }, acceptedLifts));
+  const programDuration = keeps.length > 0 ? keeps[keeps.length - 1].programOut : 0;
+  const lifted = complement(edit.sourceDuration, keeps);
+  const broll = edit.broll.flatMap((hit) => {
+    if (rejectedBroll.has(brollKey(hit))) return [];
+    const mapped = remapHit(hit, keeps);
+    return mapped ? [mapped] : [];
+  });
+  const captions = buildCaptions(words, keeps);
+  const stats = {
+    fillerCount: words.filter((word) => word.filler).length,
+    silenceCount: acceptedLifts.filter((span) => liftLabel(edit, span) === "Silence").length,
+    removedRatio: edit.sourceDuration > 0 ? 1 - programDuration / edit.sourceDuration : 0,
+    skippedSentences: edit.stats.skippedSentences,
+  };
+  return { ...edit, words, keeps, lifted, broll, captions, programDuration, stats };
+}
+
+function remapHit(hit: BrollHit, keeps: KeepSegment[]): BrollHit | null {
+  const programIn = sourceToProgram(keeps, hit.sourceIn);
+  const availableEnd = sourceToProgram(keeps, hit.sourceOut);
+  if (programIn === null || availableEnd === null) return null;
+  const length = Math.min(hit.programOut - hit.programIn, availableEnd - programIn);
+  if (length < 0.2) return null;
+  return { ...hit, programIn, programOut: programIn + length };
 }
 
 function mergeIntervals(spans: Interval[]): Interval[] {

@@ -49,6 +49,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, .lanes:focus-
   letter-spacing: -0.04em;
   line-height: 0.9;
 }
+.role { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .eyebrow {
   margin: 0 0 2px;
   color: var(--accent);
@@ -132,13 +133,30 @@ button.primary { background: var(--accent); color: var(--ink); border-color: tra
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin: 12px 0;
 }
 .stats div { background: var(--bg); border-radius: 8px; padding: 8px; }
 .stats dt { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
-.stats dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; font-weight: 700; }
+.stats dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; }
+
+.bin-label, .decisions h2 {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bin { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; }
+.bin li { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; font-size: 11px; background: var(--bg); }
+.decisions { display: grid; gap: 6px; max-height: 180px; overflow: auto; margin-bottom: 8px; }
+.decision { display: grid; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.decision p { margin: 0; display: grid; gap: 2px; font-size: 12px; }
+.decision strong { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--accent); }
+.decision div { display: flex; gap: 4px; }
+.decision button { flex: 1; border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 4px 6px; font-size: 11px; }
+.decision.rejected { opacity: 0.72; }
 
 .log {
   margin: 0;
@@ -248,6 +266,19 @@ button.primary { background: var(--accent); color: var(--ink); border-color: tra
   font-size: 12px;
 }
 .time-readout strong { color: var(--text); font-size: 14px; }
+.ruler { position: relative; height: 16px; margin-top: 4px; }
+.ruler i { position: absolute; top: 0; font-style: normal; font-size: 10px; color: var(--muted); transform: translateX(-50%); }
+.bay { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; align-items: start; }
+.track-names { display: grid; gap: 4px; }
+.track-names span {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .lanes {
   position: relative;
   display: grid;
@@ -256,8 +287,13 @@ button.primary { background: var(--accent); color: var(--ink); border-color: tra
   cursor: pointer;
 }
 .lane { position: relative; height: 28px; border-radius: 6px; background: #1a1815; overflow: hidden; }
-.lane.wave { display: flex; align-items: flex-end; gap: 1px; padding: 3px; }
-.lane.wave i { flex: 1; display: block; background: #6d645b; border-radius: 2px 2px 0 0; }
+.lane.aroll strong {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  background: #3c4a62;
+}
 .hatch {
   position: absolute;
   top: 0;

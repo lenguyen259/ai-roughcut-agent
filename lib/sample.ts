@@ -17,6 +17,22 @@ const LINES: Array<{ text: string; gapAfter: number }> = [
   { text: "That is the whole studio running in the browser.", gapAfter: 0.45 },
 ];
 
+const ROOM: Array<{ text: string; gapAfter: number }> = [
+  { text: "The guest sat down with a notebook and talked about the first winter in the harbor.", gapAfter: 0.16 },
+  { text: "um", gapAfter: 0.22 },
+  { text: "She described a quiet street, a teacher, and the suitcase she carried on the train.", gapAfter: 0.18 },
+  { text: "Tell me what you kept from that year besides the notebook.", gapAfter: 0.2 },
+  { text: "you know", gapAfter: 0.24 },
+  { text: "I kept the habit of writing before breakfast and walking the long way to the station.", gapAfter: 0.16 },
+  { text: "uh", gapAfter: 0.2 },
+  { text: "The story turns when the letter arrives and she decides to stay through spring.", gapAfter: 0.18 },
+  { text: "like", gapAfter: 0.22 },
+  { text: "We leave a little air here so the rough cut can lift the pause.", gapAfter: 8 },
+  { text: "After the pause she laughs and returns to the letter, the station, and the harbor light.", gapAfter: 0.16 },
+  { text: "basically", gapAfter: 0.2 },
+  { text: "That is the raw interview, still long, still full of breaths, waiting for a person to finish.", gapAfter: 0.18 },
+];
+
 export const CLIPS: Clip[] = [
   {
     id: "coffee",
@@ -50,21 +66,29 @@ export const CLIPS: Clip[] = [
   },
 ];
 
+const TARGET_SECONDS = 8 * 60;
+
 export function buildSample(): { words: Word[]; sourceDuration: number } {
   const words: Word[] = [];
   let cursor = 0.4;
   let index = 0;
-  for (const line of LINES) {
-    const tokens = line.text.split(/\s+/).filter(Boolean);
+  const pushLine = (text: string, gapAfter: number) => {
+    const tokens = text.split(/\s+/).filter(Boolean);
     tokens.forEach((token, tokenIndex) => {
       const duration = wordDuration(token);
       const start = cursor;
       const end = cursor + duration;
       words.push({ id: `w${index}`, text: token, start, end });
       index += 1;
-      const trailing = tokenIndex === tokens.length - 1 ? line.gapAfter : 0.07;
+      const trailing = tokenIndex === tokens.length - 1 ? gapAfter : 0.07;
       cursor = end + trailing;
     });
+  };
+  for (const line of LINES) pushLine(line.text, line.gapAfter);
+  let pass = 0;
+  while (cursor < TARGET_SECONDS && pass < 16) {
+    for (const line of ROOM) pushLine(line.text, line.gapAfter);
+    pass += 1;
   }
   return { words, sourceDuration: cursor + 0.25 };
 }

@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, type Clock } from "./Stage";
 import { Timeline } from "./Timeline";
-import { activeWordId, programToSource, runAgent, sourceToProgram } from "../lib/agent";
+import { activeWordId, applyDecisions, brollKey, liftKey, liftLabel, programToSource, runAgent, sourceToProgram } from "../lib/agent";
 import { alignTranscript, analyzeChannel, wordsFromSpeech, type ChannelAnalysis } from "../lib/audio";
-import type { Aspect } from "../lib/draw";
 import { toDecisionJson, toEdl } from "../lib/edl";
 import { CutPlayer } from "../lib/playback";
 import { CLIPS, buildSample } from "../lib/sample";
+import { formatTimecode } from "../lib/time";
 import { DEFAULT_OPTIONS, type AgentOptions, type EditResult, type PlayDomain } from "../lib/types";
 import { FrameVoice, spokenWords } from "../lib/voice";
 
@@ -18,9 +18,11 @@ type LoadedMedia = {
   buffer: AudioBuffer;
 };
 
+const REVIEW_SECONDS = 12;
+
 const REPLACEMENTS = [
-  ["Premiere", "CMX EDL"],
-  ["Claude", "Local loop"],
+  ["Premiere", "Timeline bay"],
+  ["Claude", "Local copilot"],
   ["Whisper", "Web Audio VAD"],
   ["Embeddings", "Hashed vectors"],
 ];
@@ -37,7 +39,6 @@ export function Studio() {
   const [logs, setLogs] = useState<string[]>(initial.logs);
   const [running, setRunning] = useState(false);
   const [domain, setDomain] = useState<PlayDomain>("program");
-  const [aspect, setAspect] = useState<Aspect>("16:9");
   const [playing, setPlaying] = useState(false);
   const [uiTime, setUiTime] = useState(0);
   const [sourceKind, setSourceKind] = useState<"demo" | "file">("demo");
@@ -46,7 +47,13 @@ export function Studio() {
   const [appliedTranscript, setAppliedTranscript] = useState("");
   const [error, setError] = useState("");
   const [recording, setRecording] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(true);
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [rejectedLifts, setRejectedLifts] = useState<string[]>([]);
+  const [rejectedBroll, setRejectedBroll] = useState<string[]>([]);
+  const resolved = useMemo(
+    () => applyDecisions(edit, { rejectedLiftKeys: rejectedLifts, rejectedBrollKeys: rejectedBroll }),
+    [edit, rejectedLifts, rejectedBroll],
+  );
 
   const clock = useRef<Clock>({ time: 0, playing: false });
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,7 +66,8 @@ export function Studio() {
   const playingRef = useRef(false);
   const voiceOnRef = useRef(true);
   const alive = useRef(true);
-  editRef.current = edit;
+  const sectionUntil = useRef(0);
+  editRef.current = resolved;
   domainRef.current = domain;
   sourceKindRef.current = sourceKind;
   voiceOnRef.current = voiceOn;
@@ -98,8 +106,9 @@ export function Studio() {
         } else if (!audible) {
           clock.current.time += delta;
         }
-        if (!voice.current.isRunning() && clock.current.time >= duration - 0.02) {
-          clock.current.time = duration;
+        const end = sectionUntil.current > 0 ? sectionUntil.current : duration;
+        if (clock.current.time >= end - 0.02) {
+          clock.current.time = end;
           playingRef.current = false;
           clock.current.playing = false;
           player.current.pause();
@@ -129,7 +138,7 @@ export function Studio() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const activeId = activeWordId(edit, uiTime, domain);
+  const activeId = activeWordId(resolved, uiTime, domain);
   const dirty =
     options.silenceThreshold !== applied.silenceThreshold ||
     options.aggressiveFillers !== applied.aggressiveFillers ||
@@ -146,6 +155,17 @@ export function Studio() {
     return nextDomain === "program" ? current.programDuration : current.sourceDuration;
   }
 
+  function beginSection(current: EditResult, from: number, wrap: boolean): number {
+    const duration = durationOf(current);
+    const start = wrap && from >= duration - 0.05 ? 0 : Math.min(duration, Math.max(0, from));
+    sectionUntil.current = Math.min(duration, start + REVIEW_SECONDS);
+    return start;
+  }
+
+  function reviewWords(current: EditResult, from: number) {
+    return spokenWords(current, domain, from).filter((word) => word.start < sectionUntil.current - 0.02);
+  }
+
   function pause() {
     if (sourceKind === "file") clock.current.time = player.current.pause();
     playingRef.current = false;
@@ -159,31 +179,34 @@ export function Studio() {
     const current = editRef.current;
     const duration = durationOf(current);
     const time = Math.min(Math.max(0, next), duration);
-    clock.current.time = time;
-    setUiTime(time);
-    if (playingRef.current && sourceKind !== "file" && voiceOnRef.current) {
-      voice.current.start(spokenWords(current, domain, time), time);
+    const playing = playingRef.current;
+    const start = playing ? beginSection(current, time, false) : time;
+    clock.current.time = start;
+    setUiTime(start);
+    if (playing && sourceKind !== "file" && voiceOnRef.current) {
+      voice.current.start(reviewWords(current, start), start);
     } else {
       voice.current.stop();
     }
-    if (playingRef.current && sourceKind === "file" && media) {
+    if (playing && sourceKind === "file" && media) {
       void player.current.play({
         buffer: media.buffer,
         domain,
         keeps: current.keeps,
-        from: time,
-        duration,
+        from: start,
+        duration: sectionUntil.current,
         gain: current.loudness.linear,
       });
     }
   }
 
   function seekSource(sourceTime: number) {
+    const current = editRef.current;
     if (domain === "source") {
       seek(sourceTime);
       return;
     }
-    seek(sourceToProgram(edit.keeps, sourceTime) ?? 0);
+    seek(sourceToProgram(current.keeps, sourceTime) ?? 0);
   }
 
   async function togglePlay() {
@@ -193,16 +216,14 @@ export function Studio() {
       pause();
       return;
     }
-    const duration = durationOf(current);
-    let from = clock.current.time;
-    if (from >= duration - 0.05) from = 0;
+    const from = beginSection(current, clock.current.time, true);
     clock.current.time = from;
     setUiTime(from);
     playingRef.current = true;
     clock.current.playing = true;
     setPlaying(true);
     if (sourceKind !== "file" && voiceOnRef.current) {
-      voice.current.start(spokenWords(current, domain, from), from);
+      voice.current.start(reviewWords(current, from), from);
     }
     if (sourceKind === "file" && media) {
       try {
@@ -211,7 +232,7 @@ export function Studio() {
           domain,
           keeps: current.keeps,
           from,
-          duration,
+          duration: sectionUntil.current,
           gain: current.loudness.linear,
         });
       } catch {
@@ -249,6 +270,8 @@ export function Studio() {
     if (!alive.current) return;
     setLogs([...next.logs, `Finished on-device in ${elapsed.toFixed(1)} ms.`]);
     setEdit(next);
+    setRejectedLifts([]);
+    setRejectedBroll([]);
     setApplied(options);
     setAppliedTranscript(transcript);
     clock.current.time = 0;
@@ -287,6 +310,8 @@ export function Studio() {
       const loaded = { name: file.name, analysis, buffer: decoded };
       setMedia(loaded);
       setSourceKind("file");
+      setRejectedLifts([]);
+      setRejectedBroll([]);
       const words = transcript.trim() ? alignTranscript(transcript, analysis.speech) : wordsFromSpeech(analysis.speech);
       const next = runAgent(words, CLIPS, options, {
         sourceDuration: analysis.duration,
@@ -314,6 +339,8 @@ export function Studio() {
     pause();
     setSourceKind("file");
     setError("");
+    setRejectedLifts([]);
+    setRejectedBroll([]);
     const words = transcript.trim() ? alignTranscript(transcript, media.analysis.speech) : wordsFromSpeech(media.analysis.speech);
     const next = runAgent(words, CLIPS, options, {
       sourceDuration: media.analysis.duration,
@@ -332,6 +359,8 @@ export function Studio() {
     pause();
     setSourceKind("demo");
     setError("");
+    setRejectedLifts([]);
+    setRejectedBroll([]);
     const episode = buildSample();
     const next = runAgent(episode.words, CLIPS, options, { sourceDuration: episode.sourceDuration });
     setEdit(next);
@@ -350,7 +379,8 @@ export function Studio() {
     setRecording(true);
     setError("");
     pause();
-    clock.current.time = 0;
+    const from = beginSection(current, 0, false);
+    clock.current.time = from;
     setUiTime(0);
     let pump = 0;
     try {
@@ -398,14 +428,14 @@ export function Studio() {
           buffer: media.buffer,
           domain,
           keeps: current.keeps,
-          from: 0,
-          duration,
+          from,
+          duration: sectionUntil.current,
           gain: current.loudness.linear,
         });
       }
       await new Promise<void>((resolve) => {
         const watch = () => {
-          if (!alive.current || clock.current.time >= duration - 0.04) resolve();
+          if (!alive.current || clock.current.time >= sectionUntil.current - 0.04) resolve();
           else requestAnimationFrame(watch);
         };
         requestAnimationFrame(watch);
@@ -437,8 +467,18 @@ export function Studio() {
     voiceOnRef.current = next;
     if (!next) voice.current.stop();
     else if (playingRef.current && sourceKind !== "file") {
-      voice.current.start(spokenWords(edit, domain, clock.current.time), clock.current.time);
+      voice.current.start(reviewWords(editRef.current, clock.current.time), clock.current.time);
     }
+  }
+
+  function setLift(key: string, accept: boolean) {
+    pause();
+    setRejectedLifts((current) => (accept ? current.filter((item) => item !== key) : current.includes(key) ? current : [...current, key]));
+  }
+
+  function setBroll(key: string, accept: boolean) {
+    pause();
+    setRejectedBroll((current) => (accept ? current.filter((item) => item !== key) : current.includes(key) ? current : [...current, key]));
   }
 
   return (
@@ -447,8 +487,9 @@ export function Studio() {
         <div className="brand">
           <span className={`tally ${playing || recording ? "live" : ""}`} />
           <div>
-            <p className="eyebrow">Agent 01</p>
+            <p className="eyebrow">Copilot</p>
             <h1>Roughcut</h1>
+            <p className="role">You finish the timeline</p>
           </div>
         </div>
         <ul className="chips">
@@ -466,10 +507,10 @@ export function Studio() {
         <aside className="rail">
           <div className="source-switch">
             <button type="button" className={sourceKind === "demo" ? "on" : ""} onClick={useDemo}>
-              Demo episode
+              Demo rushes
             </button>
             <button type="button" className={sourceKind === "file" ? "on" : ""} onClick={showLoadedFile}>
-              Your audio
+              Your rushes
             </button>
             <input
               ref={fileRef}
@@ -491,6 +532,13 @@ export function Studio() {
               </button>
             </p>
           ) : null}
+
+          <p className="bin-label">B-roll bin</p>
+          <ul className="bin">
+            {CLIPS.map((clip) => (
+              <li key={clip.id}>{clip.title}</li>
+            ))}
+          </ul>
 
           <label className="slider">
             <span>Silence gate {options.silenceThreshold.toFixed(2)}s</span>
@@ -540,22 +588,69 @@ export function Studio() {
 
           <dl className="stats">
             <div>
-              <dt>Source</dt>
-              <dd>{edit.sourceDuration.toFixed(1)}s</dd>
+              <dt>Rushes</dt>
+              <dd>{formatTimecode(edit.sourceDuration)}</dd>
             </div>
             <div>
-              <dt>Program</dt>
-              <dd>{edit.programDuration.toFixed(1)}s</dd>
+              <dt>Rough cut</dt>
+              <dd>{formatTimecode(resolved.programDuration)}</dd>
             </div>
             <div>
               <dt>Lifted</dt>
-              <dd>{Math.round(edit.stats.removedRatio * 100)}%</dd>
+              <dd>{Math.round(resolved.stats.removedRatio * 100)}%</dd>
             </div>
             <div>
               <dt>B-roll</dt>
-              <dd>{edit.broll.length}</dd>
+              <dd>{resolved.broll.length}</dd>
             </div>
           </dl>
+
+          <section className="decisions" aria-label="Proposed lifts">
+            <h2>Lifts</h2>
+            {edit.lifted.map((span) => {
+              const key = liftKey(span);
+              const accepted = !rejectedLifts.includes(key);
+              return (
+                <article key={key} className={accepted ? "decision" : "decision rejected"}>
+                  <p>
+                    <strong>{formatTimecode(span.start)}</strong>
+                    {liftLabel(edit, span)}
+                  </p>
+                  <div>
+                    <button type="button" className={accepted ? "on" : ""} onClick={() => setLift(key, true)}>
+                      Accept
+                    </button>
+                    <button type="button" className={accepted ? "" : "on"} onClick={() => setLift(key, false)}>
+                      Reject
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+          <section className="decisions" aria-label="Proposed B-roll">
+            <h2>B-roll hits</h2>
+            {edit.broll.map((hit) => {
+              const key = brollKey(hit);
+              const accepted = !rejectedBroll.includes(key);
+              return (
+                <article key={key} className={accepted ? "decision" : "decision rejected"}>
+                  <p>
+                    <strong>{formatTimecode(hit.programIn)}</strong>
+                    {hit.title}
+                  </p>
+                  <div>
+                    <button type="button" className={accepted ? "on" : ""} onClick={() => setBroll(key, true)}>
+                      Accept
+                    </button>
+                    <button type="button" className={accepted ? "" : "on"} onClick={() => setBroll(key, false)}>
+                      Reject
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
 
           <ol className="log">
             {logs.map((line, index) => (
@@ -564,17 +659,17 @@ export function Studio() {
           </ol>
 
           <div className="exports">
-            <button type="button" onClick={() => downloadText("roughcut.edl", toEdl(edit), "text/plain")}>
+            <button type="button" onClick={() => downloadText("roughcut.edl", toEdl(resolved), "text/plain")}>
               Download EDL
             </button>
-            <button type="button" onClick={() => downloadText("roughcut.json", toDecisionJson(edit), "application/json")}>
+            <button type="button" onClick={() => downloadText("roughcut.json", toDecisionJson(resolved), "application/json")}>
               Download JSON
             </button>
             <button type="button" onClick={() => void record()} disabled={recording}>
               {recording ? "Recording…" : "Record preview"}
             </button>
           </div>
-          <p className="hint">EDL is CMX 3600. Shotcut, Kdenlive, and DaVinci Resolve import it without Premiere.</p>
+          <p className="hint">CMX 3600 EDL. Finish the accepted cut in Shotcut, Kdenlive, or DaVinci Resolve.</p>
         </aside>
 
         <section
@@ -588,50 +683,42 @@ export function Studio() {
         >
           <div className="monitor-bar">
             <button type="button" className="primary" onClick={() => void togglePlay()}>
-              {playing ? "Pause" : "Play"}
+              {playing ? "Pause" : "Review section"}
             </button>
             <div className="segmented">
               <button type="button" className={domain === "program" ? "on" : ""} onClick={() => switchDomain("program")}>
                 Program
               </button>
               <button type="button" className={domain === "source" ? "on" : ""} onClick={() => switchDomain("source")}>
-                Source
-              </button>
-            </div>
-            <div className="segmented">
-              <button type="button" className={aspect === "16:9" ? "on" : ""} onClick={() => setAspect("16:9")}>
-                16:9
-              </button>
-              <button type="button" className={aspect === "9:16" ? "on" : ""} onClick={() => setAspect("9:16")}>
-                9:16
+                Rushes
               </button>
             </div>
             <button type="button" className={voiceOn ? "on" : ""} onClick={toggleVoice}>
-              {voiceOn ? "Voice on" : "Voice off"}
+              {voiceOn ? "Review voice on" : "Review voice"}
             </button>
           </div>
           <div className="stage-shell">
-            <Stage edit={edit} aspect={aspect} domain={domain} clock={clock} canvasRef={canvasRef} />
+            <Stage edit={resolved} aspect="16:9" domain={domain} clock={clock} canvasRef={canvasRef} />
           </div>
           {error ? <p className="error">{error}</p> : null}
-          <p className="hint center">Play locks each spoken word to the frame. Pause and seek restart the voice on that word.</p>
+          <p className="hint center">Review a section of the rough cut. Accept or reject lifts and B-roll, then finish the timeline elsewhere.</p>
         </section>
 
         <aside className="transcript">
           <header>
-            <h2>Transcript</h2>
-            <p>{edit.stats.fillerCount} fillers · {edit.captions.length} captions</p>
+            <h2>Rushes</h2>
+            <p>{resolved.stats.fillerCount} fillers still out · {resolved.broll.length} B-roll on the cut</p>
           </header>
           {sourceKind === "file" ? (
             <textarea
               value={transcript}
-              placeholder="Paste a transcript. Words are laid across detected speech, then fillers and B-roll run locally."
+              placeholder="Paste a transcript for your rushes. The copilot lifts fillers and places B-roll. You finish the timeline."
               onChange={(event) => setTranscript(event.target.value)}
             />
           ) : null}
           <div className="words">
-            {edit.words.map((word, index) => {
-              const previous = edit.words[index - 1];
+            {resolved.words.map((word, index) => {
+              const previous = resolved.words[index - 1];
               const gap = previous ? word.start - previous.end : word.start;
               return (
                 <span key={word.id} className="token">
@@ -651,7 +738,7 @@ export function Studio() {
         </aside>
       </section>
 
-      <Timeline edit={edit} domain={domain} time={uiTime} onSeek={seek} />
+      <Timeline edit={resolved} domain={domain} time={uiTime} onSeek={seek} />
     </main>
   );
 }
