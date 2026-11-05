@@ -175,18 +175,34 @@ button.primary { background: var(--accent); color: var(--ink); border-color: tra
   padding: 10px 12px;
 }
 .segmented { flex: 0 0 auto; }
-.preview,
-.preview.vertical {
+.gate {
   position: absolute;
   inset: 10px 16px;
-  width: calc(100% - 32px);
-  height: calc(100% - 20px);
-  max-width: none;
-  max-height: none;
-  object-fit: contain;
-  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.gate .plate,
+.gate .preview {
+  position: absolute;
+  inset: auto;
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: center 42%;
+  background: #14161a;
   border-radius: 12px;
-  box-shadow: var(--shadow);
+  box-shadow: none;
+}
+.gate .preview {
+  background: transparent;
+  pointer-events: none;
+}
+.gate.vertical .plate,
+.gate.vertical .preview {
+  aspect-ratio: 9 / 16;
+  object-position: center 22%;
 }
 
 .transcript textarea {

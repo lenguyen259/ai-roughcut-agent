@@ -27,6 +27,7 @@ export function paint(canvas: HTMLCanvasElement, input: PaintInput): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const { w, h } = size;
+  ctx.clearRect(0, 0, w, h);
   const sourceTime = input.domain === "source" ? input.time : programToSource(input.edit.keeps, input.time);
   const lifted = input.domain === "source" && input.edit.lifted.some((span) => sourceTime >= span.start && sourceTime <= span.end);
   const broll = findBroll(input.edit, input.domain, input.time, sourceTime, lifted);
@@ -101,210 +102,23 @@ function drawScene(
   }
 }
 
-function drawAroll(ctx: CanvasRenderingContext2D, w: number, h: number, time: number, speaking: boolean, word: string): void {
-  const portrait = h > w;
-  const cx = w * (portrait ? 0.5 : 0.46) + Math.sin(time * 1.15) * 5;
-  const head = Math.min(w, h) * (portrait ? 0.2 : 0.23);
-  const cy = h * (portrait ? 0.36 : 0.4);
-
-  const wall = ctx.createLinearGradient(0, 0, 0, h);
-  wall.addColorStop(0, "#3a2a22");
-  wall.addColorStop(0.42, "#16120f");
-  wall.addColorStop(1, "#090807");
-  ctx.fillStyle = wall;
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "rgba(255, 214, 170, 0.08)";
-  ctx.fillRect(w * 0.08, h * 0.08, w * 0.22, h * 0.34);
-  const key = ctx.createRadialGradient(cx - head * 1.1, cy - head * 1.5, 10, cx, cy, head * 3.4);
-  key.addColorStop(0, "rgba(255, 196, 140, 0.55)");
-  key.addColorStop(1, "rgba(255, 196, 140, 0)");
-  ctx.fillStyle = key;
-  ctx.fillRect(0, 0, w, h);
-  const rim = ctx.createRadialGradient(cx + head * 2.1, cy - head * 0.2, 8, cx + head, cy, head * 2.6);
-  rim.addColorStop(0, "rgba(150, 186, 255, 0.28)");
-  rim.addColorStop(1, "rgba(150, 186, 255, 0)");
-  ctx.fillStyle = rim;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.fillStyle = "#241910";
-  ctx.beginPath();
-  ctx.ellipse(cx, h * 0.9, w * 0.38, h * 0.07, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const jacket = ctx.createLinearGradient(cx - head * 2, cy, cx + head * 2, h);
-  jacket.addColorStop(0, "#3d4c68");
-  jacket.addColorStop(0.45, "#243044");
-  jacket.addColorStop(1, "#151b28");
-  ctx.fillStyle = jacket;
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 2.35, h);
-  ctx.quadraticCurveTo(cx - head * 1.85, cy + head * 1.05, cx - head * 0.72, cy + head * 0.92);
-  ctx.quadraticCurveTo(cx, cy + head * 1.35, cx + head * 0.72, cy + head * 0.92);
-  ctx.quadraticCurveTo(cx + head * 1.85, cy + head * 1.05, cx + head * 2.35, h);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 0.42, cy + head * 1.05);
-  ctx.lineTo(cx - head * 0.08, cy + head * 1.85);
-  ctx.moveTo(cx + head * 0.42, cy + head * 1.05);
-  ctx.lineTo(cx + head * 0.08, cy + head * 1.85);
-  ctx.stroke();
-  ctx.fillStyle = "#f7f1e8";
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 0.22, cy + head * 0.95);
-  ctx.lineTo(cx, cy + head * 1.7);
-  ctx.lineTo(cx + head * 0.22, cy + head * 0.95);
-  ctx.closePath();
-  ctx.fill();
-
-  round(ctx, cx - head * 0.2, cy + head * 0.78, head * 0.4, head * 0.42, head * 0.16, "#e8b894");
-
-  ctx.fillStyle = "#c98462";
-  ctx.beginPath();
-  ctx.ellipse(cx - head * 0.86, cy + head * 0.08, head * 0.14, head * 0.22, -0.25, 0, Math.PI * 2);
-  ctx.ellipse(cx + head * 0.86, cy + head * 0.08, head * 0.14, head * 0.22, 0.25, 0, Math.PI * 2);
-  ctx.fill();
-
-  const skin = ctx.createRadialGradient(cx - head * 0.28, cy - head * 0.4, head * 0.08, cx, cy + head * 0.1, head * 1.05);
-  skin.addColorStop(0, "#ffe4cc");
-  skin.addColorStop(0.62, "#f0b892");
-  skin.addColorStop(1, "#d08a68");
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + head * 0.04, head * 0.78, head * 0.92, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#1b140f";
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 0.72, cy - head * 0.18);
-  ctx.quadraticCurveTo(cx - head * 0.9, cy - head * 0.95, cx - head * 0.05, cy - head * 1.05);
-  ctx.quadraticCurveTo(cx + head * 0.85, cy - head * 0.95, cx + head * 0.74, cy - head * 0.12);
-  ctx.quadraticCurveTo(cx + head * 0.35, cy - head * 0.48, cx + head * 0.05, cy - head * 0.5);
-  ctx.quadraticCurveTo(cx - head * 0.28, cy - head * 0.38, cx - head * 0.72, cy - head * 0.18);
-  ctx.fill();
-  const sheen = ctx.createLinearGradient(cx - head * 0.2, cy - head, cx + head * 0.4, cy - head * 0.3);
-  sheen.addColorStop(0, "rgba(255, 220, 180, 0)");
-  sheen.addColorStop(0.5, "rgba(255, 220, 180, 0.18)");
-  sheen.addColorStop(1, "rgba(255, 220, 180, 0)");
-  ctx.fillStyle = sheen;
-  ctx.fill();
-
-  ctx.fillStyle = "rgba(214, 96, 82, 0.18)";
-  ctx.beginPath();
-  ctx.ellipse(cx - head * 0.36, cy + head * 0.28, head * 0.13, head * 0.07, 0, 0, Math.PI * 2);
-  ctx.ellipse(cx + head * 0.36, cy + head * 0.28, head * 0.13, head * 0.07, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const blink = time % 4.8 > 4.62;
-  drawEye(ctx, cx - head * 0.3, cy - head * 0.02, head, blink);
-  drawEye(ctx, cx + head * 0.3, cy - head * 0.02, head, blink);
-  ctx.strokeStyle = "#5c3b32";
-  ctx.lineWidth = Math.max(2.5, head * 0.04);
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 0.46, cy - head * 0.22);
-  ctx.quadraticCurveTo(cx - head * 0.3, cy - head * 0.34, cx - head * 0.12, cy - head * 0.2);
-  ctx.moveTo(cx + head * 0.14, cy - head * 0.2);
-  ctx.quadraticCurveTo(cx + head * 0.32, cy - head * 0.34, cx + head * 0.48, cy - head * 0.22);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(168, 96, 74, 0.85)";
-  ctx.lineWidth = Math.max(2, head * 0.028);
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + head * 0.08);
-  ctx.quadraticCurveTo(cx + head * 0.1, cy + head * 0.24, cx, cy + head * 0.3);
-  ctx.stroke();
-
-  drawMouth(ctx, cx, cy + head * 0.48, head, speaking, word, time);
-
-  ctx.strokeStyle = "#c5ccd6";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(cx - head * 1.35, h * 0.86);
-  ctx.quadraticCurveTo(cx - head * 1.05, cy + head * 1.15, cx - head * 0.95, cy + head * 1.05);
-  ctx.stroke();
-  ctx.fillStyle = "#e8edf2";
-  ctx.beginPath();
-  ctx.ellipse(cx - head * 0.95, cy + head * 1.02, head * 0.11, head * 0.16, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#2a313c";
-  ctx.beginPath();
-  ctx.ellipse(cx - head * 0.95, cy + head * 1.0, head * 0.045, head * 0.07, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const plateY = h - 108;
-  round(ctx, 28, plateY, Math.min(360, w * 0.42), 68, 10, "rgba(8,8,10,0.78)");
+function drawAroll(ctx: CanvasRenderingContext2D, w: number, h: number, _time: number, _speaking: boolean, _word: string): void {
+  const shade = ctx.createLinearGradient(0, 0, 0, h * 0.28);
+  shade.addColorStop(0, "rgba(0,0,0,0.55)");
+  shade.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, w, h * 0.28);
+  const plateW = Math.min(340, w * 0.46);
+  round(ctx, 28, 28, plateW, 64, 8, "rgba(8,8,10,0.72)");
   ctx.fillStyle = "#ff6a2a";
-  ctx.fillRect(28, plateY, 7, 68);
+  ctx.fillRect(28, 28, 6, 64);
   ctx.fillStyle = "#f6f1e8";
   ctx.textAlign = "left";
-  ctx.font = "700 26px Georgia, serif";
-  ctx.fillText("HOST", 48, plateY + 30);
-  ctx.font = "600 15px Segoe UI, sans-serif";
+  ctx.font = "700 24px Georgia, serif";
+  ctx.fillText("HOST", 48, 54);
+  ctx.font = "600 14px Segoe UI, sans-serif";
   ctx.fillStyle = "#d9d0c3";
-  ctx.fillText("CAM A  ·  SUNDAY SHIP", 48, plateY + 52);
-}
-
-function drawEye(ctx: CanvasRenderingContext2D, x: number, y: number, head: number, blink: boolean): void {
-  ctx.fillStyle = "#fffaf6";
-  ctx.beginPath();
-  ctx.ellipse(x, y, head * 0.13, blink ? head * 0.02 : head * 0.09, 0, 0, Math.PI * 2);
-  ctx.fill();
-  if (blink) return;
-  ctx.fillStyle = "#3a2a24";
-  ctx.beginPath();
-  ctx.arc(x + head * 0.02, y, head * 0.05, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#16100e";
-  ctx.beginPath();
-  ctx.arc(x + head * 0.02, y, head * 0.025, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(x + head * 0.045, y - head * 0.03, head * 0.016, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, head: number, speaking: boolean, word: string, time: number): void {
-  const shape = mouthShape(word, speaking, time);
-  if (shape === "rest") {
-    ctx.strokeStyle = "#a85a58";
-    ctx.lineWidth = Math.max(3, head * 0.045);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(x - head * 0.16, y);
-    ctx.quadraticCurveTo(x, y + head * 0.06, x + head * 0.16, y);
-    ctx.stroke();
-    return;
-  }
-  const open = shape === "round" ? 0.16 : shape === "wide" ? 0.1 : shape === "closed" ? 0.035 : 0.12;
-  const wide = shape === "wide" ? 0.22 : shape === "round" ? 0.14 : 0.18;
-  ctx.fillStyle = "#6e2430";
-  ctx.beginPath();
-  ctx.ellipse(x, y, head * wide, head * open, 0, 0, Math.PI * 2);
-  ctx.fill();
-  if (shape !== "closed") {
-    ctx.fillStyle = "#f4efe8";
-    ctx.fillRect(x - head * wide * 0.55, y - head * open * 0.15, head * wide * 1.1, Math.max(2, head * 0.035));
-  }
-  ctx.strokeStyle = "#c47674";
-  ctx.lineWidth = Math.max(2, head * 0.03);
-  ctx.beginPath();
-  ctx.ellipse(x, y - head * open * 0.2, head * wide, head * open * 0.55, 0, Math.PI, 0);
-  ctx.stroke();
-}
-
-function mouthShape(word: string, speaking: boolean, time: number): "rest" | "wide" | "round" | "closed" | "open" {
-  if (!speaking) return "rest";
-  const token = word.toLowerCase();
-  const flap = Math.abs(Math.sin(time * 16));
-  if (flap < 0.18) return "closed";
-  if (/[oôuùú]/.test(token)) return "round";
-  if (/[ieyí]/.test(token)) return "wide";
-  if (/^[mbp]/.test(token)) return "closed";
-  return "open";
+  ctx.fillText("CAM A  ·  SUNDAY SHIP", 48, 76);
 }
 
 function drawCoffee(ctx: CanvasRenderingContext2D, w: number, h: number, time: number): void {
@@ -453,24 +267,25 @@ function drawLift(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 }
 
 function drawCaption(ctx: CanvasRenderingContext2D, cue: CaptionCue, domain: PlayDomain, time: number, w: number, h: number): void {
-  const text = cue.words.map((word) => word.text).join(" ");
-  ctx.font = `700 ${Math.max(28, Math.floor(w / 28))}px Segoe UI, sans-serif`;
-  const width = Math.min(w * 0.86, ctx.measureText(text).width + 48);
-  const y = h * (w < h ? 0.74 : 0.8);
-  round(ctx, (w - width) / 2, y, width, Math.max(54, h * 0.07), 14, "rgba(8, 8, 10, 0.78)");
-  ctx.textAlign = "left";
+  const size = Math.max(32, Math.floor(w / 24));
+  ctx.font = `800 ${size}px "Segoe UI", sans-serif`;
   ctx.textBaseline = "middle";
-  let cursor = (w - width) / 2 + 24;
-  const mid = y + Math.max(54, h * 0.07) / 2;
-  for (const word of cue.words) {
+  ctx.lineJoin = "round";
+  const widths = cue.words.map((word) => ctx.measureText(`${word.text} `).width);
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  let cursor = (w - total) / 2;
+  const mid = h * (w < h ? 0.78 : 0.84);
+  cue.words.forEach((word, index) => {
     const start = domain === "program" ? word.programIn : word.sourceIn;
     const end = domain === "program" ? word.programOut : word.sourceOut;
     const active = time >= start && time < end;
-    ctx.font = `700 ${Math.max(28, Math.floor(w / 28))}px Segoe UI, sans-serif`;
-    ctx.fillStyle = active ? "#ff6a2a" : "#f3ecdf";
+    ctx.lineWidth = Math.max(6, size * 0.16);
+    ctx.strokeStyle = "#111";
+    ctx.strokeText(word.text, cursor, mid);
+    ctx.fillStyle = active ? "#ffe14a" : "#ffffff";
     ctx.fillText(word.text, cursor, mid);
-    cursor += ctx.measureText(`${word.text} `).width;
-  }
+    cursor += widths[index] ?? 0;
+  });
 }
 
 function burnIn(ctx: CanvasRenderingContext2D, input: PaintInput, sourceTime: number, w: number, h: number): void {
@@ -497,7 +312,7 @@ function gradient(ctx: CanvasRenderingContext2D, w: number, h: number, from: str
 function vignette(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const paint = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.2, w / 2, h / 2, Math.max(w, h) * 0.72);
   paint.addColorStop(0, "rgba(0,0,0,0)");
-  paint.addColorStop(1, "rgba(0,0,0,0.48)");
+  paint.addColorStop(1, "rgba(0,0,0,0.28)");
   ctx.fillStyle = paint;
   ctx.fillRect(0, 0, w, h);
 }

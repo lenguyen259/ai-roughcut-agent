@@ -352,8 +352,31 @@ export function Studio() {
     pause();
     clock.current.time = 0;
     setUiTime(0);
+    let pump = 0;
     try {
-      const stream = canvas.captureStream(30);
+      const host = canvas.parentElement?.querySelector("video") ?? null;
+      const buffer = document.createElement("canvas");
+      buffer.width = canvas.width;
+      buffer.height = canvas.height;
+      const layer = buffer.getContext("2d");
+      const stream = layer ? buffer.captureStream(30) : canvas.captureStream(30);
+      const paintRecord = () => {
+        if (layer) {
+          const focus = buffer.height > buffer.width ? 0.22 : 0.42;
+          if (host instanceof HTMLVideoElement && host.readyState >= 2 && host.videoWidth > 0) {
+            const scale = Math.max(buffer.width / host.videoWidth, buffer.height / host.videoHeight);
+            const dw = host.videoWidth * scale;
+            const dh = host.videoHeight * scale;
+            layer.drawImage(host, (buffer.width - dw) / 2, (buffer.height - dh) * focus, dw, dh);
+          } else {
+            layer.fillStyle = "#14161a";
+            layer.fillRect(0, 0, buffer.width, buffer.height);
+          }
+          layer.drawImage(canvas, 0, 0);
+        }
+        pump = requestAnimationFrame(paintRecord);
+      };
+      if (layer) pump = requestAnimationFrame(paintRecord);
       if (sourceKind === "file" && media) {
         player.current.captureStream()?.getAudioTracks().forEach((track) => stream.addTrack(track));
       }
@@ -399,6 +422,7 @@ export function Studio() {
       playingRef.current = false;
       setPlaying(false);
     } finally {
+      cancelAnimationFrame(pump);
       setRecording(false);
     }
   }
